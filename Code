@@ -1,0 +1,129 @@
+# Load libraries
+import numpy as np
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+## Load data
+path = 'F:/Kaggle/Sberbank Housing Price Prediction'
+train = pd.read_csv(os.path.join(path,"train.csv"),parse_dates=['timestamp'])
+test = pd.read_csv(os.path.join(path,"test.csv"),parse_dates=['timestamp'])
+macro = pd.read_csv(os.path.join(path,"macro.csv"))
+submission = pd.read_csv(os.path.join(path,"sample_submission.csv"))
+
+macro["timestamp"] = pd.to_datetime(macro["timestamp"])
+macro["year"]  = macro["timestamp"].dt.year
+macro["month"] = macro["timestamp"].dt.month
+macro["yearmonth"] = 100*macro.year + macro.month
+macmeds = macro.groupby("yearmonth").median()
+macmeds.head()
+
+train["timestamp"] = pd.to_datetime(train["timestamp"])
+train["year"]  = train["timestamp"].dt.year
+train["month"] = train["timestamp"].dt.month
+train["yearmonth"] = 100*train.year + train.month
+prices = train[["yearmonth","price_doc"]]
+p = prices.groupby("yearmonth").median()
+p.head()
+df = macmeds.join(p)
+
+### Functions to deal with Almon Lags
+import numpy.matlib as ml
+ 
+def almonZmatrix(X, maxlag, maxdeg):
+    """
+    Creates the Z matrix corresponding to vector X.
+    """
+    n = len(X)
+    Z = ml.zeros((len(X)-maxlag, maxdeg+1))
+    for t in range(maxlag,  n):
+       #Solve for Z[t][0].
+       Z[t-maxlag,0] = sum([X[t-lag] for lag in range(maxlag+1)])
+       for j in range(1, maxdeg+1):
+             s = 0.0
+             for i in range(1, maxlag+1):       
+                s += (i)**j * X[t-i]
+             Z[t-maxlag,j] = s
+    return Z
+
+def almonXcof(zcof, maxlag):
+    """
+    Transforms the 'b' coefficients in Z to 'a' coefficients in X.
+    """
+    maxdeg  = len(zcof)-1
+    xcof    = [zcof[0]] * (maxlag+1)
+    for i in range(1, maxlag+1):
+         s = 0.0
+         k = i
+         for j in range(1, maxdeg+1):
+             s += (k * zcof[j])
+             k *= i
+         xcof[i] += s
+    return xcof
+    
+### Prepare data for macro model
+y = df.price_doc.div(df.cpi).apply(np.log).loc[201108:201506]
+print( y.head() )
+y.shape
+
+df.rename(columns={'rent_price_4+room_bus': 'rent_price_4room_bus'}, inplace=True)
+
+nobs = 47  # August 2011 through June 2015, months with price_doc data
+tblags = 5    # Number of lags used on PDL for Trade Balance
+mrlags = 5    # Number of lags used on PDL for Mortgage Rate
+lags = 5
+ztb = almonZmatrix(df.balance_trade.loc[201103:201506].as_matrix(), tblags, 1)
+zmr = almonZmatrix(df.mortgage_rate.loc[201103:201506].as_matrix(), mrlags, 1)
+zdv  = almonZmatrix(df.deposits_value.loc[201103:201506].as_matrix(), lags, 1)
+zmv = almonZmatrix(df.mortgage_value.loc[201103:201506].as_matrix(), lags, 1)
+zrp4 = almonZmatrix(df.rent_price_4room_bus.loc[201103:201506].as_matrix(), lags, 1)
+zrp3 = almonZmatrix(df.rent_price_3room_bus.loc[201103:201506].as_matrix(), lags, 1)
+zrp2 = almonZmatrix(df.rent_price_2room_bus.loc[201103:201506].as_matrix(), lags, 1)
+zrp1 = almonZmatrix(df.rent_price_1room_bus.loc[201103:201506].as_matrix(), lags, 1)
+zrpec3 = almonZmatrix(df.rent_price_3room_eco.loc[201103:201506].as_matrix(), lags, 1)
+zrpec2 = almonZmatrix(df.rent_price_2room_eco.loc[201103:201506].as_matrix(), lags, 1)
+zrpec1 = almonZmatrix(df.rent_price_1room_eco.loc[201103:201506].as_matrix(), lags, 1)
+
+columns = ['tb0', 'tb1', 'mr0', 'mr1','dv0','dv1','mv0','mv1','rp40','rp41','rp30','rp31','rp20','rp21','rp10','rp11',
+          'rpec30','rpec31','rpec20','rpec21','rpec10','rpec11']
+z = pd.DataFrame( np.concatenate( (ztb, zmr,zdv,zmv,zrp4,zrp3,zrp2,zrp1,zrpec3,zrpec2,zrpec1), axis=1), y.index.values, columns )
+X = sm.add_constant( z )
+X.shape
+
+eq = sm.OLS(y, X)
+fit = eq.fit()
+fit.summary()
+
+%matplotlib inline
+plt.plot(y.values)
+plt.plot(pd.Series(fit.predict(X)).values)
+
+test_cpi = df.cpi.loc[201507:201605]
+test_index = test_cpi.index
+ztb_test = almonZmatrix(df.balance_trade.loc[201502:201605].as_matrix(), tblags, 1)
+zmr_test = almonZmatrix(df.mortgage_rate.loc[201502:201605].as_matrix(), mrlags, 1)
+
+ztb_test = almonZmatrix(df.balance_trade.loc[201502:201605].as_matrix(), tblags, 1)
+zmr_test = almonZmatrix(df.mortgage_rate.loc[201502:201605].as_matrix(), mrlags, 1)
+zdv_test  = almonZmatrix(df.deposits_value.loc[201502:201605].as_matrix(), lags, 1)
+zmv_test = almonZmatrix(df.mortgage_value.loc[201502:201605].as_matrix(), lags, 1)
+zrp4_test = almonZmatrix(df.rent_price_4room_bus.loc[201502:201605].as_matrix(), lags, 1)
+zrp3_test = almonZmatrix(df.rent_price_3room_bus.loc[201502:201605].as_matrix(), lags, 1)
+zrp2_test = almonZmatrix(df.rent_price_2room_bus.loc[201502:201605].as_matrix(), lags, 1)
+zrp1_test = almonZmatrix(df.rent_price_1room_bus.loc[201502:201605].as_matrix(), lags, 1)
+zrpec3_test = almonZmatrix(df.rent_price_3room_eco.loc[201502:201605].as_matrix(), lags, 1)
+zrpec2_test = almonZmatrix(df.rent_price_2room_eco.loc[201502:201605].as_matrix(), lags, 1)
+zrpec1_test = almonZmatrix(df.rent_price_1room_eco.loc[201502:201605].as_matrix(), lags, 1)
+
+z_test = pd.DataFrame( np.concatenate( (ztb_test, zmr_test,zdv_test,zmv_test,zrp4_test
+                                ,zrp3_test,zrp2_test,zrp1_test,zrpec3_test,zrpec2_test,zrpec1_test), axis=1)
+                                 , test_index, columns )
+
+#z_test = pd.DataFrame( np.concatenate( (ztb_test, zmr_test), axis=1), test_index, columns )
+X_test = sm.add_constant( z_test )
+pred_lnrp = fit.predict( X_test )
+pred_p = np.exp(pred_lnrp) * test_cpi
+pred_p.to_csv("monthly_macro_predicted.csv")
+
+===============================================================================================
