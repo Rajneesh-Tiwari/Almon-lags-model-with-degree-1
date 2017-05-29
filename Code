@@ -128,4 +128,4 @@ pred_p.to_csv("monthly_macro_predicted.csv")
 
 ===============================================================================================
 
-### hige thanks to https://www.kaggle.com/aharless/simple-macro-model-for-monthly-house-prices/notebook 
+### huge thanks to https://www.kaggle.com/aharless/simple-macro-model-for-monthly-house-prices/notebook 
